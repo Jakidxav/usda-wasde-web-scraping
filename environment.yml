@@ -1,0 +1,17 @@
+name: wasde_web_scraping
+channels:
+- conda-forge
+- anaconda
+dependencies:
+- beautifulsoup4
+- ipython
+- ipykernel
+- ipywidgets
+- matplotlib
+- notebook
+- numpy
+- openpyxl
+- pandas
+- pyproj
+- requests
+- xlrd
