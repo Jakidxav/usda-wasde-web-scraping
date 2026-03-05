@@ -1,4 +1,4 @@
-name: wasde_web_scraping
+name: wasde_data
 channels:
 - conda-forge
 - anaconda

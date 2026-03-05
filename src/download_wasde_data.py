@@ -12,8 +12,9 @@ than the XML and PDF files. I was able to download PDFs and extract text, but th
 formatting was basically unusable.
 """
 
+import argparse
 from bs4 import BeautifulSoup
-import datetime
+from datetime import datetime
 import io
 import os
 import pandas as pd
@@ -22,38 +23,6 @@ import re
 import requests
 import sys
 from urllib.parse import urljoin
-
-BASE_URL = ("https://esmis.nal.usda.gov/publication/world-agricultural-supply-and-demand-estimates")
-START_YEAR = 1995
-START_MONTH = 1
-END_YEAR = 2026
-END_MONTH = 1
-
-# options: corn, cotton, soybeans
-CROP = 'cotton'
-
-if CROP == 'corn':
-    # corn regex pattern starts with 'feed grain and corn' and *normally* ends with 'sorghum, barley(,) and oats'
-    START_TEXT_PATTERN = re.compile(r'U\.?\s*\.?S\.?\s*Feed\s+Grain\s+and\s+Corn\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
-    END_TEXT_PATTERN = re.compile(r'U\.?\s*\.?S\.?\s*Sorghum,\s+Barley,?\s+and\s+Oats\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
-    XLS_SEARCH_PATTERN = re.compile(r'U\.?\s*\.?S\.?\s*Feed\s+Grain\s+and\s+Corn\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
-elif CROP == 'cotton':
-    # soybean regex pattern starts with 'cotton' and *normally* ends with 'world wheat'
-    START_TEXT_PATTERN = re.compile(r'U\.?\s*\.?S\.?\s*Cotton\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
-    END_TEXT_PATTERN   = re.compile(r'World\s+Wheat\s+Supply\s+and\s+Use\s+1/?', re.IGNORECASE)
-    XLS_SEARCH_PATTERN = re.compile(r'U\.?\s*\.?S\.?\s*Cotton\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
-elif CROP == 'soybeans':
-    # soybean regex pattern starts with 'soybeans and products' and *normally* ends with 'sugar'
-    START_TEXT_PATTERN = re.compile(r'U\.?\s*\.?S\.?\s*Soybeans\s+and\s+Products\s+Supply\s+and\s+Use', re.IGNORECASE)
-    END_TEXT_PATTERN          = re.compile(r'U\.?\s*\.?S\.?\s*Sugar\s+Supply\s+and\s+Use', re.IGNORECASE)
-    ALT_END_TEXT_PATTERN      = re.compile(r'World\s+Soybean\s+Supply\s+and\s+Use\s+1/?', re.IGNORECASE)
-    END_OF_FILE_TEXT_PATTERN  = re.compile(r'End\s+of\s+File', re.IGNORECASE)
-    XLS_SEARCH_PATTERN        = re.compile(fr'U\.?\s*\.?S\.?\s*Soybeans\s+and\s+Products\s+Supply\s+and\s+Use', re.IGNORECASE)
-
-SCRIPT_DIR = Path(__file__).resolve().parent             # ./src
-PROJECT_ROOT = SCRIPT_DIR.parent                         # .. project root
-OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / f"{CROP}"   # e.g., ../data/raw/soy/
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def month_range(start_year: int, start_month: int, end_year: int, end_month: int):
@@ -82,12 +51,12 @@ def month_range(start_year: int, start_month: int, end_year: int, end_month: int
         yield dt.year, dt.month
 
 
-def build_query_url(year: int, month: int) -> str:
+def build_query_url(base: str, year: int, month: int) -> str:
     """
     Create a date-specific URL with ?date=YYYY-MM
     """
     
-    return f"{BASE_URL}?date={year:04d}-{month:02d}"
+    return f"{base}?date={year:04d}-{month:02d}"
 
 
 def resolve_absolute(base: str, href: str) -> str:
@@ -118,18 +87,33 @@ def download_binary(url: str) -> bytes:
     return resp.content
 
 
-def extract_crop_section(text: str, *, lines_before_start: int = 2) -> str | None:
+def extract_crop_section(crop: str, text: str, lines_before_start: int = 2) -> str | None:
     """
     Return the block that:
       • Begins *lines_before_start* full lines **before** the first occurrence
-        of `START_TEXT_PATTERN`. In general, there are 2-3 lines of text including USDA
+        of `start_text_pattern`. In general, there are 2-3 lines of text including USDA
         report numbers that I would like to keep in the raw text files for validation.
-      • Ends **just before** the first occurrence of `END_TEXT_PATTERN` that appears
+      • Ends **just before** the first occurrence of `end_text_pattern` that appears
         after the start marker.
 
     If either marker cannot be found, `None` is returned.
     """
-    start_match = START_TEXT_PATTERN.search(text)
+    if crop == 'corn':
+        # corn regex pattern starts with 'feed grain and corn' and *normally* ends with 'sorghum, barley(,) and oats'
+        start_pattern = re.compile(r'U\.?\s*\.?S\.?\s*Feed\s+Grain\s+and\s+Corn\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
+        end_pattern   = re.compile(r'U\.?\s*\.?S\.?\s*Sorghum,\s+Barley,?\s+and\s+Oats\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
+    elif crop == 'cotton':
+        # cotton regex pattern starts with 'cotton' and *normally* ends with 'world wheat'
+        start_pattern = re.compile(r'U\.?\s*\.?S\.?\s*Cotton\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
+        end_pattern   = re.compile(r'World\s+Wheat\s+Supply\s+and\s+Use\s+1/?', re.IGNORECASE)
+    else: # crop == 'soybeans':
+        # soybean regex pattern starts with 'soybeans and products' and *normally* ends with 'sugar'
+        start_pattern    = re.compile(r'U\.?\s*\.?S\.?\s*Soybeans\s+and\s+Products\s+Supply\s+and\s+Use', re.IGNORECASE)
+        end_pattern      = re.compile(r'U\.?\s*\.?S\.?\s*Sugar\s+Supply\s+and\s+Use', re.IGNORECASE)
+        alt_end_pattern  = re.compile(r'World\s+Soybean\s+Supply\s+and\s+Use\s+1/?', re.IGNORECASE)
+        eof_pattern      = re.compile(r'End\s+of\s+File', re.IGNORECASE)
+
+    start_match = start_pattern.search(text)
     if not start_match:
         return None
 
@@ -147,10 +131,10 @@ def extract_crop_section(text: str, *, lines_before_start: int = 2) -> str | Non
             break
         line_start = prev_newline + 1    # start of the previous line
 
-    if CROP == 'soybeans':
+    if crop == 'soybean':
         # the stats / reports crop order has changed over time, so let's look for a second end text option
-        alt_end_match = ALT_END_TEXT_PATTERN.search(text, pos=start_match.end())
-        end_of_file_match = END_OF_FILE_TEXT_PATTERN.search(text, pos=start_match.end())
+        alt_end_match = end_pattern.search(text, pos=start_match.end())
+        end_of_file_match = eof_pattern.search(text, pos=start_match.end())
 
         if end_match:
             return text[line_start:end_match.start()]
@@ -161,14 +145,14 @@ def extract_crop_section(text: str, *, lines_before_start: int = 2) -> str | Non
         else:
             return None
 
-    end_match = END_TEXT_PATTERN.search(text, pos=start_match.end())
+    end_match = end_pattern.search(text, pos=start_match.end())
     if end_match:
         return text[line_start:end_match.start()]
     else:
         return None
 
 # find a txt link inside the <h2> “Releases”
-def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int) -> str | None:
+def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int, crop: str) -> str | None:
     """
     Return the href of the first .txt link that appears under the
     <h2> heading whose text is “Releases”. This is to remove confusion over
@@ -217,10 +201,7 @@ def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int) -> str | Non
     if month == 12 and year == 2010:
         return None
 
-    # if CROP == 'corn':
-    #     return None
-
-    if CROP == 'cotton':
+    if crop == 'cotton':
         # # January 1995: return the second text file
         # if year == 1995 and month in [1]:
         #     return txt_links[1] if txt_links else None
@@ -233,8 +214,8 @@ def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int) -> str | Non
         if month == 10 and year == 2008:
             return txt_links[2] if txt_links else None
 
-    # wasde‑MM‑DD‑YYYY.txt, wasde‑MM‑DD‑YYYY_{CROP}.txt, wasde‑MM‑DD‑YYYY_revision.txt, etc.
-    primary_pat = re.compile(fr"^wasde-\d{2}-\d{2}-\d{4}(?:_{{CROP}})?\.txt$", re.I)
+    # wasde‑MM‑DD‑YYYY.txt, wasde‑MM‑DD‑YYYY_{crop}.txt, wasde‑MM‑DD‑YYYY_revision.txt, etc.
+    primary_pat = re.compile(fr"^wasde-\d{2}-\d{2}-\d{4}(?:_{{crop}})?\.txt$", re.I)
     for href in txt_links:
         if primary_pat.match(os.path.basename(href)):
             return href
@@ -250,13 +231,13 @@ def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int) -> str | Non
 
 
 # validate that the chosen filename really belongs to the query month
-def filename_matches_query(href: str, query_year: int, query_month: int) -> bool:
+def filename_matches_query(href: str, crop: str, query_year: int, query_month: int) -> bool:
     """
     Decide whether a discovered .txt (or .xls) link really belongs to the month
     we are querying.
 
     Accepted filename forms:
-      wasde-MM-DD-YYYY.txt/.xls or wasde-MM-DD-YYYY_{CROP}.txt
+      wasde-MM-DD-YYYY.txt/.xls or wasde-MM-DD-YYYY_{crop}.txt
       wasdeMMYY.txt/.xls or wasdeMMYYvN.txt/.xls
       latest.txt/latest.xls)
       Any other file that explicitly contains the four-digit year we are looking for
@@ -265,8 +246,8 @@ def filename_matches_query(href: str, query_year: int, query_month: int) -> bool
 
     fname = basename(href).lower()
 
-    # wasde‑MM‑DD‑YYYY.txt/.xls or wasde‑MM‑DD‑YYYY_{CROP}.txt
-    m = re.fullmatch(fr"wasde-\d{2}-\d{2}-\d{4}(?:_{{CROP}})?\.txt | wasde-(\d{2})-\d{2}-(\d{4})\.xls", fname)
+    # wasde‑MM‑DD‑YYYY.txt/.xls or wasde‑MM‑DD‑YYYY_{crop}.txt
+    m = re.fullmatch(fr"wasde-\d{2}-\d{2}-\d{4}(?:_{{crop}})?\.txt | wasde-(\d{2})-\d{2}-(\d{4})\.xls", fname)
     if m:
         month = int(m.group(1) or m.group(3))
         year  = int(m.group(2) or m.group(4))
@@ -361,11 +342,21 @@ def excel_col_letter(idx: int) -> str:
     
     return letters
 
-def search_sheet_for_pattern(df: pd.DataFrame, pattern: re.Pattern) -> list[dict]:
+def search_sheet_for_pattern(crop: str, df: pd.DataFrame) -> list[dict]:
     """
     Scan a DataFrame (one worksheet) for cells that match `pattern`.
     Returns a list of dicts with row, column letter, and the cell's string value.
     """
+    if crop == 'corn':
+        # corn regex pattern starts with 'feed grain and corn' and *normally* ends with 'sorghum, barley(,) and oats'
+        pattern = re.compile(r'U\.?\s*\.?S\.?\s*Feed\s+Grain\s+and\s+Corn\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
+    elif crop == 'cotton':
+        # cotton regex pattern starts with 'cotton' and *normally* ends with 'world wheat'
+        pattern = re.compile(r'U\.?\s*\.?S\.?\s*Cotton\s+Supply\s+and\s+Use\s+1', re.IGNORECASE)
+    else: # crop == 'soybeans':
+        # soybean regex pattern starts with 'soybeans and products' and *normally* ends with 'sugar'
+        pattern = re.compile(fr'U\.?\s*\.?S\.?\s*Soybeans\s+and\s+Products\s+Supply\s+and\s+Use', re.IGNORECASE)
+
     matches = []
 
     # normalise a Series to a one‑column DataFrame (handles single‑column sheets)
@@ -388,7 +379,7 @@ def search_sheet_for_pattern(df: pd.DataFrame, pattern: re.Pattern) -> list[dict
     return matches
 
 
-def main():
+def scrape_wasde_data():
     """
     Main webscraping script for data coming from the USDA's World Agricultural Supply and Demand Estimates site.
 
@@ -424,116 +415,243 @@ def main():
                                  so the script looks for alternate regex patterns
 
     """
-    # validate that the CROP variable is one of the crops this script can handle
-    # no other checks should need to be made for CROP in the script
-    if CROP not in ['corn', 'cotton', 'soybeans']:
-        raise ValueError('Only corn, cotton, and soybeans can be downloaded with this script right now.')
-
-    session = requests.Session()
-
-    for year, month in month_range(START_YEAR, START_MONTH, END_YEAR, END_MONTH):
-        # note, this is for all crops
-        no_data_list = ['10-2013', '01-2019', '10-2025']
-        
-        # same here: the text files do not exist for any crop, so look for XLS files instead
-        no_text_list = pd.date_range(start='2010-10-01', end='2016-09-01', freq='MS').strftime('%m-%Y').tolist()
-
-        if f"{month:02d}-{year}" in no_data_list:
-            # for the month, we can add a 0 to the int version to make the years the same
-            print(f"⚠️  Ignoring data for {month:02d}-{year} because it does not exist.")
-            continue
-
-        query_url = build_query_url(year, month)
-
-        # retrieve the HTML page for the month
+    def valid_crop(crop: str) -> str:
+        """
+        Validate that the `crop` argument is one of the crops this script currently supports.
+        """
         try:
-            page_resp = session.get(query_url, timeout=30)
-            page_resp.raise_for_status()
-        except Exception as exc:
-            print(f"❌ Could not retrieve page: {exc}")
-            continue
+            crop = str(crop)
+        except:
+            raise argparse.ArgumentTypeError('Crop values must be of type `str`.')
 
-        soup = BeautifulSoup(page_resp.text, "html.parser")
+        valid_crops = ['corn', 'cotton', 'soybean']
+        if crop not in valid_crops:
+            raise argparse.ArgumentTypeError(f"Crop `{crop}` is not one of: ['corn', 'cotton', 'soybeans'].")
 
-        # try to find a matching TEXT file
-        candidate_href = find_wasde_txt_link(soup, month, year)
+        return crop
 
-        if candidate_href and filename_matches_query(candidate_href, year, month):
-            # ------------ TEXT path ----------------------------
-            txt_url = resolve_absolute(BASE_URL, candidate_href)
-            print(f"\n🔎 {year:04d}-{month:02d} → {query_url}")
-            print(f"📥 Downloading: {txt_url}")
+
+    def valid_month(month: str) -> int:
+        """
+        Assert that input argument `month` is of type int and is in the range [1, 12].
+        """
+        try:
+            month = int(month)
+        except:
+            raise argparse.ArgumentTypeError('Month values must be of type `int`.')
+
+        valid_months = list(range(1, 13, 1))
+        if month not in valid_months:
+            raise argparse.ArgumentTypeError(f'Month values must be between [1, 12].')
+
+        return month
+
+
+    def valid_year(year: str) -> None:
+        """
+        Assert that input argument `year` is of type int and is in the range [1995, 2026].
+        """
+        try:
+            year = int(year)
+        except:
+            raise argparse.ArgumentTypeError('Year values must be of type `int`.')
+
+        valid_years = list(range(1995, 2027, 1))
+        if year not in valid_years:
+            raise argparse.ArgumentTypeError(f'Year values must be between [{valid_years[0]}, {valid_years[-1]}].')
+
+        return year
+        
+
+    parser = argparse.ArgumentParser(description='Web scraping script for USDA WASDE crop statistics.')
+    
+    parser.add_argument(
+        '-c', 
+        '--crops', 
+        type=lambda x: valid_crop(x),
+        nargs='+',
+        required=True, 
+        choices=['corn', 'cotton', 'soybean'],
+        help='Crop name(s).'
+    )
+
+    parser.add_argument(
+        '-sy',
+        '--start-year',
+        type=valid_year,
+        default=1995,
+        help='Year to begin web scraping. Min supported year is `1995`.')
+
+    parser.add_argument(
+        '-sm',
+        '--start-month',
+        type=valid_month,
+        default=1,
+        help='Month to begin web scraping. Min month is `1`.')
+
+    parser.add_argument(
+        '-ey',
+        '--end-year',
+        type=valid_year,
+        default=datetime.today().year,
+        help='Year to end web scraping. Max supported year is `2026`.')
+
+    parser.add_argument(
+        '-em',
+        '--end-month',
+        type=valid_month,
+        default=datetime.today().month,
+        help='Month to end web scraping. Max month is `12`.')
+    
+    parser.add_argument(
+        '--s',
+        '--silent',
+        type=bool,
+        default=True,
+        help='If `True`, only print output for dates where \
+            the script fails or there is known missing data.')
+
+    args = parser.parse_args()
+    CROPS = args.crops
+    START_YEAR = args.start_year
+    START_MONTH = args.start_month
+    END_YEAR = args.end_year
+    END_MONTH = args.end_month
+    SILENT = args.silent
+
+    # check to make sure end year >= start year, end month >= start month
+    if END_YEAR < START_YEAR:
+        raise ValueError('Please enter an end year >= to the start year.')
+
+    if END_MONTH < START_MONTH:
+        raise ValueError('Please enter an end month >= to the start month.')
+
+    BASE_URL = ("https://esmis.nal.usda.gov/publication/world-agricultural-supply-and-demand-estimates")
+    SCRIPT_DIR = Path(__file__).resolve().parent             # ./src
+    PROJECT_ROOT = SCRIPT_DIR.parent                         # .. project root
+
+    for crop in CROPS:             
+        OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / f"{crop}"   # e.g., ../data/raw/soy/
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+        session = requests.Session()
+
+        print(f'Downloading data for {crop}')
+
+        for year, month in month_range(START_YEAR, START_MONTH, END_YEAR, END_MONTH):
+            # note, this is for all crops
+            no_data_list = ['10-2013', '01-2019', '10-2025']
+            
+            # same here: the text files do not exist for any crop, so look for XLS files instead
+            no_text_list = pd.date_range(start='2010-10-01', end='2016-09-01', freq='MS').strftime('%m-%Y').tolist()
+
+            if f"{month:02d}-{year}" in no_data_list:
+                # for the month, we can add a 0 to the int version to make the years the same
+                print(f"   ⚠️ Ignoring data for {month:02d}-{year} because it does not exist.")
+                continue
+
+            query_url = build_query_url(BASE_URL, year, month)
+
+            # retrieve the HTML page for the month
+            try:
+                page_resp = session.get(query_url, timeout=30)
+                page_resp.raise_for_status()
+            except Exception as exc:
+                print(f"   ❌ Could not retrieve page: {exc}")
+                continue
+
+            soup = BeautifulSoup(page_resp.text, "html.parser")
+
+            # try to find a matching TEXT file
+            candidate_href = find_wasde_txt_link(soup, month, year, crop)
+
+            if candidate_href and filename_matches_query(candidate_href, crop, year, month):
+                # ------------ TEXT path ----------------------------
+                txt_url = resolve_absolute(BASE_URL, candidate_href)
+                if not SILENT:
+                    print()
+                    print(f"   🔎 {year:04d}-{month:02d} → {query_url}")
+                    print(f"   📥 Downloading: {txt_url}")
+
+                try:
+                    raw_txt = download_text(txt_url)
+                except Exception as exc:
+                    print(f"   ❌ Failed to download .txt: {exc}")
+                    continue
+
+                crop_block = extract_crop_section(crop, raw_txt)
+
+                if not crop_block:
+                    print("   ⚠️ Markers not found - skipping this file.")
+                    continue
+
+                out_path = OUTPUT_DIR / f"{crop}_{year:04d}_{month:02d}.txt"
+                out_path.write_text(crop_block, encoding="utf-8")
+                if not SILENT:
+                    print(f"   ✅ Saved → {out_path}")
+                    print()
+                continue   # we’re done for this month – go to next iteration
+
+            # no suitable TXT → try XLS fallback
+            xls_href = find_wasde_xls_link(soup, month, year)
+
+            if not xls_href or not filename_matches_query(xls_href, year, month):
+                # Neither TXT nor XLS matched – report and move on
+                print()
+                print(f"   🔎 {year:04d}-{month:02d} → {query_url}")
+                print(f"   ⚠️ No matching .txt or .xls file found for this {month}-{year}.")
+                continue
+
+            # ------------ XLS path ----------------------------------
+            xls_url = resolve_absolute(BASE_URL, xls_href)
+            if not SILENT:
+                print()
+                print(f"   🔎 {year:04d}-{month:02d} → {query_url}")
+                print(f"   📥 XLS fallback found: {xls_url}")
 
             try:
-                raw_txt = download_text(txt_url)
+                xls_bytes = download_binary(xls_url)
             except Exception as exc:
-                print(f"❌ Failed to download .txt: {exc}")
+                print(f"   ❌ Failed to download .xls: {exc}")
                 continue
 
-            crop_block = extract_crop_section(raw_txt)
-            if not crop_block:
-                print("⚠️  Markers not found – skipping this file.")
+            # load the workbook (all sheets) into a dict of DataFrames
+            try:
+                sheets_dict = pd.read_excel(io.BytesIO(xls_bytes), sheet_name=None)
+            except Exception as exc:
+                print(f"   ❌ Could not parse the XLS workbook: {exc}")
                 continue
 
-            out_path = OUTPUT_DIR / f"{CROP}_{year:04d}_{month:02d}.txt"
-            out_path.write_text(crop_block, encoding="utf-8")
-            print(f"✅ Saved → {out_path}")
+            # search each sheet for the soy- or corn‑supply regex and keep only those that contain at least one match
+            matching_sheets = {}
+
+            for sheet_name, df in sheets_dict.items():
+                matches = search_sheet_for_pattern(crop, df)
+                if matches: # if this sheet has a hit, keep it
+                    matching_sheets[sheet_name] = df
+
+            if not matching_sheets:
+                print("   ⚠️ No worksheet contained the search pattern – skipping XLS.")
+                continue
+
+            # write ONLY the matching worksheets to a new XLS file
+            out_path = OUTPUT_DIR / f"{crop}_{year:04d}_{month:02d}.xls"
+            with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+                for sheet_name, df in matching_sheets.items():
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            if not SILENT:
+                print(f"   ✅ Saved matching sheet(s) → {out_path}")
+                print()
+        
+        if not SILENT:
+            print(f'🎉 Finished! All extracted files for {crop} are in: {OUTPUT_DIR.resolve()}')
             print()
-            continue   # we’re done for this month – go to next iteration
-
-        # no suitable TXT → try XLS fallback
-        xls_href = find_wasde_xls_link(soup, month, year)
-
-        if not xls_href or not filename_matches_query(xls_href, year, month):
-            # Neither TXT nor XLS matched – report and move on
-            print(f"\n🔎 {year:04d}-{month:02d} → {query_url}")
-            print(f"⚠️  No matching .txt or .xls file found for this {month}-{year}.")
-            continue
-
-        # ------------ XLS path ----------------------------------
-        xls_url = resolve_absolute(BASE_URL, xls_href)
-        print(f"\n🔎 {year:04d}-{month:02d} → {query_url}")
-        print(f"📥 XLS fallback found: {xls_url}")
-
-        try:
-            xls_bytes = download_binary(xls_url)
-        except Exception as exc:
-            print(f"❌ Failed to download .xls: {exc}")
-            continue
-
-        # load the workbook (all sheets) into a dict of DataFrames
-        try:
-            sheets_dict = pd.read_excel(io.BytesIO(xls_bytes), sheet_name=None)
-        except Exception as exc:
-            print(f"❌ Could not parse the XLS workbook: {exc}")
-            continue
-
-        # search each sheet for the soy- or corn‑supply regex and keep only those that contain at least one match
-        matching_sheets = {}
-
-        for sheet_name, df in sheets_dict.items():
-            matches = search_sheet_for_pattern(df, XLS_SEARCH_PATTERN)
-            if matches:                     # this sheet has a hit → keep it
-                matching_sheets[sheet_name] = df
-
-        if not matching_sheets:
-            print("⚠️  No worksheet contained the search pattern – skipping XLS.")
-            continue
-
-        # write ONLY the matching worksheets to a new XLS file
-        out_path = OUTPUT_DIR / f"{CROP}_{year:04d}_{month:02d}.xls"
-        with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-            for sheet_name, df in matching_sheets.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-        print(f"✅ Saved matching sheet(s) → {out_path}")
-        print()
-    
-    print("\n🎉 Finished! All extracted files are in:", OUTPUT_DIR.resolve())
 
 
 if __name__ == "__main__":
     try:
-        main()
+        scrape_wasde_data()
     except KeyboardInterrupt:
-        sys.exit("\nInterrupted by user.")
+        print()
+        sys.exit('Interrupted by user.')

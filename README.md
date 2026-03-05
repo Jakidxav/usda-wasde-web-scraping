@@ -15,5 +15,47 @@ mamba env create -f environment.yml
 ```
 And to activate the environment:
 ```
-mamba activate wasde_web_scraping
+mamba activate wasde_data
+```
+
+## Running the code
+### 1. Scrape the data for supported crops from the WASDE site
+To run the program for individual crops, you can for example run:
+```
+python3 src/download_wasde_data.py -c cotton
+```
+
+You can also run this Python script for multiple or all of the supported crops with:
+```
+python3 src/download_wasde_data.py -c corn cotton soybean
+```
+
+By default, the web scraping script will start looking for data in `1995` and then try to download all data until the current year and month. You can override this behavior by supplying arguments for the start or end year / month.
+
+#### Example: download data for a single year
+```
+python3 src/download_wasde_data.py -c corn -sy 2000 -ey 2000
+```
+
+#### Example: download data from May of one year to April of the next (mimicking an example commodity year)
+```
+python3 src/download_wasde_data.py -c corn -sy 2015 -sm 5 -ey 2016 -em 4
+```
+
+Currently, downloading data for only specific months in consecutive years (April - October for 1996, 1997, etc.) is not supported. The script will download all data in between `{start_year}-{start_month}` and `{end_year}-{end_month}`, e.g., `end_month` corresponds to the month that the script will stop processing data for `end_year`.
+
+Lastly, this script currently suppresses printing output when monthly data is successfully downloaded. You can change this behavior to see all output with the `-s` flag.
+```
+python3 src/download_wasde_data.py -c soybean -s False
+```
+
+### 2. Parse the downloaded `TXT` and `XLS` files
+Similar to how the web scraping script works, you can parse files for individual crops or multiple / all crops. The parsing script will look for all available files to parse for a given crop, so there is no need to supply start and end year / month arguments.
+```
+python3 src/parse_wasde_files.py -c corn
+```
+
+Or:
+```
+python3 src/parse_wasde_files.py -c corn soybean
 ```
