@@ -44,7 +44,7 @@ python3 src/download_wasde_data.py -c corn -sy 2015 -sm 5 -ey 2016 -em 4
 
 Currently, downloading data for only specific months in consecutive years (April - October for 1996, 1997, etc.) is not supported. The script will download all data in between `{start_year}-{start_month}` and `{end_year}-{end_month}`, e.g., `end_month` corresponds to the month that the script will stop processing data for `end_year`. The default value for `end_month` is `12`, as the script defaults to looking for data from January - December. While the script will not fail when looking for data that does not exist, this behavior can be easily overriden if you are analyzing data for the current year and the current month is before than December.
 
-Lastly, this script currently suppresses printing output when monthly data is successfully downloaded. You can change this behavior to see all output with the `-show-output` flag.
+Lastly, this script currently suppresses printing output when monthly data is successfully downloaded. You can change this behavior to see all output with the `--show-output` flag.
 ```
 python3 src/download_wasde_data.py -c soybean -s True
 ```
