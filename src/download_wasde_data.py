@@ -13,15 +13,17 @@ formatting was basically unusable.
 """
 
 import argparse
-from bs4 import BeautifulSoup
 from datetime import datetime
 import io
 import os
-import pandas as pd
-from pathlib import Path
 import re
 import requests
 import sys
+
+from bs4 import BeautifulSoup
+import pandas as pd
+from pathlib import Path
+from tqdm.auto import tqdm
 from urllib.parse import urljoin
 
 
@@ -132,6 +134,7 @@ def extract_crop_section(crop: str, text: str, lines_before_start: int = 2) -> s
         line_start = prev_newline + 1    # start of the previous line
 
     if crop == 'soybean':
+        end_match = end_pattern.search(text, pos=start_match.end())
         # the stats / reports crop order has changed over time, so let's look for a second end text option
         alt_end_match = end_pattern.search(text, pos=start_match.end())
         end_of_file_match = eof_pattern.search(text, pos=start_match.end())
@@ -500,15 +503,16 @@ def scrape_wasde_data():
         '-em',
         '--end-month',
         type=valid_month,
-        default=datetime.today().month,
+        default=12,
         help='Month to end web scraping. Max month is `12`.')
     
     parser.add_argument(
-        '--s',
-        '--silent',
+        '-s',
+        '--show-output',
         type=bool,
-        default=True,
-        help='If `True`, only print output for dates where \
+        default=False,
+        choices=[True, False],
+        help='If `False`, include all print output, not for dates where \
             the script fails or there is known missing data.')
 
     args = parser.parse_args()
@@ -517,28 +521,31 @@ def scrape_wasde_data():
     START_MONTH = args.start_month
     END_YEAR = args.end_year
     END_MONTH = args.end_month
-    SILENT = args.silent
+    SHOW_OUTPUT = args.show_output
 
     # check to make sure end year >= start year, end month >= start month
     if END_YEAR < START_YEAR:
         raise ValueError('Please enter an end year >= to the start year.')
 
-    if END_MONTH < START_MONTH:
+    # we only need to check if end month >= start month when downloading data for one calendar year
+    if (END_YEAR == START_YEAR) and (END_MONTH < START_MONTH):
         raise ValueError('Please enter an end month >= to the start month.')
 
-    BASE_URL = ("https://esmis.nal.usda.gov/publication/world-agricultural-supply-and-demand-estimates")
+    BASE_URL = ('https://esmis.nal.usda.gov/publication/world-agricultural-supply-and-demand-estimates')
     SCRIPT_DIR = Path(__file__).resolve().parent             # ./src
     PROJECT_ROOT = SCRIPT_DIR.parent                         # .. project root
 
     for crop in CROPS:             
-        OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / f"{crop}"   # e.g., ../data/raw/soy/
+        OUTPUT_DIR = PROJECT_ROOT / 'data' / 'raw' / f'{crop}'   # e.g., ../data/raw/soy/
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         session = requests.Session()
 
-        print(f'Downloading data for {crop}')
+        print()
+        print(f'Downloading data for {crop} from {START_YEAR}-{str(START_MONTH).zfill(2)} til {END_YEAR}-{str(END_MONTH).zfill(2)}')
 
-        for year, month in month_range(START_YEAR, START_MONTH, END_YEAR, END_MONTH):
+        dates_to_download = list(month_range(START_YEAR, START_MONTH, END_YEAR, END_MONTH))
+        for year, month in tqdm(dates_to_download, position=0, leave=True):
             # note, this is for all crops
             no_data_list = ['10-2013', '01-2019', '10-2025']
             
@@ -547,79 +554,82 @@ def scrape_wasde_data():
 
             if f"{month:02d}-{year}" in no_data_list:
                 # for the month, we can add a 0 to the int version to make the years the same
-                print(f"   ⚠️ Ignoring data for {month:02d}-{year} because it does not exist.")
+                tqdm.write(f"   ⚠️  Ignoring data for {month:02d}-{year} because it does not exist.")
+                tqdm.write('')
                 continue
 
             query_url = build_query_url(BASE_URL, year, month)
+            if SHOW_OUTPUT:
+                tqdm.write(f"   🔎 {year:04d}-{month:02d} → {query_url}")
 
             # retrieve the HTML page for the month
             try:
                 page_resp = session.get(query_url, timeout=30)
                 page_resp.raise_for_status()
             except Exception as exc:
-                print(f"   ❌ Could not retrieve page: {exc}")
+                tqdm.write(f"   ❌ Could not retrieve page: {exc}")
                 continue
 
             soup = BeautifulSoup(page_resp.text, "html.parser")
 
             # try to find a matching TEXT file
-            candidate_href = find_wasde_txt_link(soup, month, year, crop)
+            txt_href = find_wasde_txt_link(soup, month, year, crop)
 
-            if candidate_href and filename_matches_query(candidate_href, crop, year, month):
+            if txt_href and filename_matches_query(txt_href, crop, year, month):
                 # ------------ TEXT path ----------------------------
-                txt_url = resolve_absolute(BASE_URL, candidate_href)
-                if not SILENT:
-                    print()
-                    print(f"   🔎 {year:04d}-{month:02d} → {query_url}")
-                    print(f"   📥 Downloading: {txt_url}")
+                txt_url = resolve_absolute(BASE_URL, txt_href)
+                if SHOW_OUTPUT:
+                    tqdm.write(f"   📥 Downloading: {txt_url}")
 
                 try:
                     raw_txt = download_text(txt_url)
                 except Exception as exc:
-                    print(f"   ❌ Failed to download .txt: {exc}")
+                    tqdm.write(f"   ❌ Failed to download .txt: {exc}")
+                    tqdm.write('')
                     continue
 
                 crop_block = extract_crop_section(crop, raw_txt)
 
                 if not crop_block:
-                    print("   ⚠️ Markers not found - skipping this file.")
+                    tqdm.write(f"   ⚠️  Markers not found for {year}-{str(month).zfill(2)} - skipping this TXT file.")
+                    tqdm.write('')
                     continue
 
                 out_path = OUTPUT_DIR / f"{crop}_{year:04d}_{month:02d}.txt"
                 out_path.write_text(crop_block, encoding="utf-8")
-                if not SILENT:
-                    print(f"   ✅ Saved → {out_path}")
-                    print()
+                
+                if SHOW_OUTPUT:
+                    tqdm.write(f"   ✅ Saved → {out_path}")
+                    tqdm.write('')
                 continue   # we’re done for this month – go to next iteration
 
             # no suitable TXT → try XLS fallback
             xls_href = find_wasde_xls_link(soup, month, year)
 
-            if not xls_href or not filename_matches_query(xls_href, year, month):
+            if not xls_href or not filename_matches_query(xls_href, crop, year, month):
                 # Neither TXT nor XLS matched – report and move on
-                print()
-                print(f"   🔎 {year:04d}-{month:02d} → {query_url}")
-                print(f"   ⚠️ No matching .txt or .xls file found for this {month}-{year}.")
+                tqdm.write(f"   ⚠️  No matching .txt or .xls file found for this {year}-{str(month).zfill(2)}.")
+                tqdm.write('')
                 continue
 
             # ------------ XLS path ----------------------------------
             xls_url = resolve_absolute(BASE_URL, xls_href)
-            if not SILENT:
-                print()
-                print(f"   🔎 {year:04d}-{month:02d} → {query_url}")
-                print(f"   📥 XLS fallback found: {xls_url}")
+            if SHOW_OUTPUT:
+                tqdm.write(f"   📥 XLS fallback found: {xls_url}")
 
             try:
                 xls_bytes = download_binary(xls_url)
             except Exception as exc:
-                print(f"   ❌ Failed to download .xls: {exc}")
+                tqdm.write(f"   ❌ Failed to download .xls: {exc}")
+                tqdm.write('')
                 continue
 
             # load the workbook (all sheets) into a dict of DataFrames
             try:
                 sheets_dict = pd.read_excel(io.BytesIO(xls_bytes), sheet_name=None)
             except Exception as exc:
-                print(f"   ❌ Could not parse the XLS workbook: {exc}")
+                tqdm.write(f"   ❌ Could not parse the XLS workbook: {exc}")
+                tqdm.write('')
                 continue
 
             # search each sheet for the soy- or corn‑supply regex and keep only those that contain at least one match
@@ -631,7 +641,8 @@ def scrape_wasde_data():
                     matching_sheets[sheet_name] = df
 
             if not matching_sheets:
-                print("   ⚠️ No worksheet contained the search pattern – skipping XLS.")
+                tqdm.write('   ⚠️  No worksheet contained the search pattern - skipping XLS.')
+                tqdm.write('')
                 continue
 
             # write ONLY the matching worksheets to a new XLS file
@@ -640,13 +651,13 @@ def scrape_wasde_data():
                 for sheet_name, df in matching_sheets.items():
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-            if not SILENT:
-                print(f"   ✅ Saved matching sheet(s) → {out_path}")
-                print()
+            if SHOW_OUTPUT:
+                tqdm.write(f"   ✅ Saved matching sheet(s) → {out_path}")
+                tqdm.write('')
         
-        if not SILENT:
-            print(f'🎉 Finished! All extracted files for {crop} are in: {OUTPUT_DIR.resolve()}')
-            print()
+        print()
+        print(f'🎉 Finished! All extracted files for {crop} are in: {OUTPUT_DIR.resolve()}')
+        print('')
 
 
 if __name__ == "__main__":
