@@ -23,7 +23,7 @@ import sys
 from bs4 import BeautifulSoup
 import pandas as pd
 from pathlib import Path
-from tqdm.auto import tqdm
+from tqdm import tqdm
 from urllib.parse import urljoin
 
 
@@ -133,7 +133,7 @@ def extract_crop_section(crop: str, text: str, lines_before_start: int = 2) -> s
             break
         line_start = prev_newline + 1    # start of the previous line
 
-    if crop == 'soybean':
+    if crop == 'soybeans':
         end_match = end_pattern.search(text, pos=start_match.end())
         # the stats / reports crop order has changed over time, so let's look for a second end text option
         alt_end_match = end_pattern.search(text, pos=start_match.end())
@@ -427,7 +427,7 @@ def scrape_wasde_data():
         except:
             raise argparse.ArgumentTypeError('Crop values must be of type `str`.')
 
-        valid_crops = ['corn', 'cotton', 'soybean']
+        valid_crops = ['corn', 'cotton', 'soybeans']
         if crop not in valid_crops:
             raise argparse.ArgumentTypeError(f"Crop `{crop}` is not one of: ['corn', 'cotton', 'soybeans'].")
 
@@ -473,8 +473,8 @@ def scrape_wasde_data():
         '--crops', 
         type=lambda x: valid_crop(x),
         nargs='+',
-        required=True, 
-        choices=['corn', 'cotton', 'soybean'],
+        choices=['corn', 'cotton', 'soybeans'],
+        default=['corn', 'cotton', 'soybeans'],
         help='Crop name(s).'
     )
 
@@ -532,8 +532,8 @@ def scrape_wasde_data():
         raise ValueError('Please enter an end month >= to the start month.')
 
     BASE_URL = ('https://esmis.nal.usda.gov/publication/world-agricultural-supply-and-demand-estimates')
-    SCRIPT_DIR = Path(__file__).resolve().parent             # ./src
-    PROJECT_ROOT = SCRIPT_DIR.parent                         # .. project root
+    SCRIPT_DIR = Path(__file__).resolve().parent                 # ./src
+    PROJECT_ROOT = SCRIPT_DIR.resolve().parent                   # .. project root
 
     for crop in CROPS:             
         OUTPUT_DIR = PROJECT_ROOT / 'data' / 'raw' / f'{crop}'   # e.g., ../data/raw/soy/
@@ -548,7 +548,7 @@ def scrape_wasde_data():
         for year, month in tqdm(dates_to_download, position=0, leave=True):
             # note, this is for all crops
             no_data_list = ['10-2013', '01-2019', '10-2025']
-            
+
             # same here: the text files do not exist for any crop, so look for XLS files instead
             no_text_list = pd.date_range(start='2010-10-01', end='2016-09-01', freq='MS').strftime('%m-%Y').tolist()
 
