@@ -36,10 +36,6 @@ repos:
           # whitespace before ':', line break before binary operator, and line too long
           - --extend-ignore=E203,W503,E501
           - --exclude=.git,__pycache__,build,dist,.eggs,*.egg-info,migrations,venv,.venv
-          # ignore unused imports in __init__.py
-          - --per-file-ignores=__init__.py:F401
-          # ignore missing docstrings in tests
-          - --per-file-ignores=tests/*:D100,D101,D102,D103
 
   # cleanup hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
