@@ -37,8 +37,8 @@ def month_range(start_year: int, start_month: int, end_year: int, end_month: int
          (2023, 6), (2023, 7), (2023, 8), (2023, 9), (2023,10),
          (2023,11), (2023,12)]
     """
-    # Build a pandas DatetimeIndex that starts on 1‑Jan‑start_year
-    # and ends on 1‑Dec‑end_year (the “MS” frequency gives the first day
+    # Build a pandas DatetimeIndex that starts on 1-Jan-start_year
+    # and ends on 1-Dec-end_year (the “MS” frequency gives the first day
     # of each month).  Using `normalize()` ensures we have midnight timestamps.
     assert end_year >= start_year
 
@@ -63,7 +63,7 @@ def build_query_url(base: str, year: int, month: int) -> str:
 
 def resolve_absolute(base: str, href: str) -> str:
     """
-    Make a possibly‑relative href absolute.
+    Make a possibly-relative href absolute.
     """
 
     return urljoin(base, href)
@@ -116,7 +116,7 @@ def extract_crop_section(crop: str, text: str, lines_before_start: int = 2) -> s
             r"U\.?\s*\.?S\.?\s*Cotton\s+Supply\s+and\s+Use\s+1", re.IGNORECASE
         )
         end_pattern = re.compile(r"World\s+Wheat\s+Supply\s+and\s+Use\s+1/?", re.IGNORECASE)
-    else:  # crop == 'soybeans':
+    elif crop == 'soybeans':
         # soybean regex pattern starts with 'soybeans and products' and *normally* ends with 'sugar'
         start_pattern = re.compile(
             r"U\.?\s*\.?S\.?\s*Soybeans\s+and\s+Products\s+Supply\s+and\s+Use",
@@ -125,6 +125,13 @@ def extract_crop_section(crop: str, text: str, lines_before_start: int = 2) -> s
         end_pattern = re.compile(r"U\.?\s*\.?S\.?\s*Sugar\s+Supply\s+and\s+Use", re.IGNORECASE)
         alt_end_pattern = re.compile(r"World\s+Soybean\s+Supply\s+and\s+Use\s+1/?", re.IGNORECASE)
         eof_pattern = re.compile(r"End\s+of\s+File", re.IGNORECASE)
+    else:  # crop == 'wheat'
+        start_pattern = re.compile(
+            r"U\.?\s*\.?S\.?\s*Wheat\s+Supply\s+and\s+Use\s+1", re.IGNORECASE
+        )
+        end_pattern = re.compile(
+            r"U\.?\s*\.?S\.?\s*Wheat\s+by\s+Class:?\s*Supply\s+and\s+Use", re.IGNORECASE
+        )
 
     start_match = start_pattern.search(text)
     if not start_match:
@@ -173,7 +180,7 @@ def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int, crop: str) -
     <h2> heading whose text is “Releases”. This is to remove confusion over
     text files that you might get, since data under a <h2> tag of "Latest release"
     is present on ever page. The search respects the same priority order as before
-    (full date → two‑digit year → any .txt).
+    (full date --> two-digit year --> any .txt).
     """
     # Find the <h2> that says “Releases”
     releases_h2 = None
@@ -216,7 +223,7 @@ def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int, crop: str) -
     if month == 12 and year == 2010:
         return None
 
-    if crop == "cotton":
+    if crop == 'cotton':
         # # January 1995: return the second text file
         # if year == 1995 and month in [1]:
         #     return txt_links[1] if txt_links else None
@@ -225,11 +232,12 @@ def find_wasde_txt_link(soup: BeautifulSoup, month: int, year: int, crop: str) -
         if year == 1996 and month in [1, 2, 3, 4]:
             return txt_links[1] if txt_links else None
 
+    if crop == 'cotton' or crop == 'wheat':
         # October 2008: return the third text file
         if month == 10 and year == 2008:
             return txt_links[2] if txt_links else None
 
-    # wasde‑MM‑DD‑YYYY.txt, wasde‑MM‑DD‑YYYY_{crop}.txt, wasde‑MM‑DD‑YYYY_revision.txt, etc.
+    # wasde-MM-DD-YYYY.txt, wasde-MM-DD-YYYY_{crop}.txt, wasde-MM-DD-YYYY_revision.txt, etc.
     primary_pat = re.compile(rf"^wasde-\d{2}-\d{2}-\d{4}(?:_{{crop}})?\.txt$", re.I)
     for href in txt_links:
         if primary_pat.match(os.path.basename(href)):
@@ -261,7 +269,7 @@ def filename_matches_query(href: str, crop: str, query_year: int, query_month: i
 
     fname = basename(href).lower()
 
-    # wasde‑MM‑DD‑YYYY.txt/.xls or wasde‑MM‑DD‑YYYY_{crop}.txt
+    # wasde-MM-DD-YYYY.txt/.xls or wasde-MM-DD-YYYY_{crop}.txt
     m = re.fullmatch(
         rf"wasde-\d{2}-\d{2}-\d{4}(?:_{{crop}})?\.txt | wasde-(\d{2})-\d{2}-(\d{4})\.xls",
         fname,
@@ -271,7 +279,7 @@ def filename_matches_query(href: str, crop: str, query_year: int, query_month: i
         year = int(m.group(2) or m.group(4))
         return month == query_month and year == query_year
 
-    # wasdeMMYY.txt/.xls   (two‑digit year)
+    # wasdeMMYY.txt/.xls   (two-digit year)
     # wasdeMMYYvN.txt/.xls (version suffix)
     m = re.fullmatch(
         r"wasde(\d{2})(\d{2})(?:v\d+)?\.txt|wasde(\d{2})(\d{2})(?:v\d+)?\.xls",
@@ -279,7 +287,7 @@ def filename_matches_query(href: str, crop: str, query_year: int, query_month: i
     )
     if m:
         month = int(m.group(1) or m.group(3))
-        year = 2000 + int(m.group(2) or m.group(4))  # assumes 2000‑2099
+        year = 2000 + int(m.group(2) or m.group(4))  # assumes 2000-2099
         return month == query_month and year == query_year
 
     # generic filenames that i have found so far: latest.txt/.xls
@@ -291,7 +299,7 @@ def filename_matches_query(href: str, crop: str, query_year: int, query_month: i
     if str(query_year) in fname:
         return True
 
-    # nothing matched → not a suitable file for this month
+    # nothing matched --> not a suitable file for this month
     return False
 
 
@@ -330,7 +338,7 @@ def find_wasde_xls_link(soup: BeautifulSoup, month: int, year: int) -> str | Non
         a["href"] for a in container.find_all("a", href=True) if a["href"].lower().endswith(".xls")
     ]
 
-    # wasde‑MM‑DD‑YYYY.xls
+    # wasde-MM-DD-YYYY.xls
     primary_pat = re.compile(r"^wasde-\d{2}-\d{2}-\d{4}\.xls$", re.I)
     for href in xls_links:
         if primary_pat.match(os.path.basename(href)):
@@ -348,7 +356,7 @@ def find_wasde_xls_link(soup: BeautifulSoup, month: int, year: int) -> str | Non
 
 def excel_col_letter(idx: int) -> str:
     """
-    Convert a zero‑based column index to an Excel column letter (A, B, …).
+    Convert a zero-based column index to an Excel column letter (A, B, …).
     """
     letters = ""
     idx += 1
@@ -364,25 +372,28 @@ def search_sheet_for_pattern(crop: str, df: pd.DataFrame) -> list[dict]:
     Scan a DataFrame (one worksheet) for cells that match `pattern`.
     Returns a list of dicts with row, column letter, and the cell's string value.
     """
-    if crop == "corn":
+    if crop == 'corn':
         # corn regex pattern starts with 'feed grain and corn' and *normally* ends with 'sorghum, barley(,) and oats'
         pattern = re.compile(
             r"U\.?\s*\.?S\.?\s*Feed\s+Grain\s+and\s+Corn\s+Supply\s+and\s+Use\s+1",
             re.IGNORECASE,
         )
-    elif crop == "cotton":
+    elif crop == 'cotton':
         # cotton regex pattern starts with 'cotton' and *normally* ends with 'world wheat'
         pattern = re.compile(r"U\.?\s*\.?S\.?\s*Cotton\s+Supply\s+and\s+Use\s+1", re.IGNORECASE)
-    else:  # crop == 'soybeans':
+    elif crop == 'soybeans':
         # soybean regex pattern starts with 'soybeans and products' and *normally* ends with 'sugar'
         pattern = re.compile(
             r"U\.?\s*\.?S\.?\s*Soybeans\s+and\s+Products\s+Supply\s+and\s+Use",
             re.IGNORECASE,
         )
+    else:  # crop == 'wheat'
+        # wheat regex pattern starts with 'wheat' and ends with 'feed grains and corn'
+        pattern = re.compile(r"U\.?\s*\.?S\.?\s*Wheat\s+Supply\s+and\s+Use\s+1", re.IGNORECASE)
 
     matches = []
 
-    # normalise a Series to a one‑column DataFrame (handles single‑column sheets)
+    # normalise a Series to a one-column DataFrame (handles single-column sheets)
     if isinstance(df, pd.Series):
         df = df.to_frame(name="__single_column__")
 
@@ -391,11 +402,11 @@ def search_sheet_for_pattern(crop: str, df: pd.DataFrame) -> list[dict]:
 
     for r in range(n_rows):
         for c in range(n_cols):
-            cell_str = str(arr[r, c])  # safe conversion (NaN → 'nan')
+            cell_str = str(arr[r, c])  # safe conversion (NaN --> 'nan')
             if pattern.search(cell_str):
                 matches.append(
                     {
-                        "row": r + 1,  # 1‑based row number (Excel style)
+                        "row": r + 1,  # 1-based row number (Excel style)
                         "col": excel_col_letter(c),
                         "value": cell_str,
                     }
@@ -439,6 +450,8 @@ def scrape_wasde_data():
         - Data for October 2008: first end regex search pattern fails because we reach the end of the file,
                                  so the script looks for alternate regex patterns
 
+    - Wheat:
+        - Data for October 2008 contains three text files: we need the third one.
     """
 
     def valid_crop(crop: str) -> str:
@@ -450,10 +463,10 @@ def scrape_wasde_data():
         except ValueError:
             raise argparse.ArgumentTypeError("Crop values must be of type `str`.")
 
-        valid_crops = ["corn", "cotton", "soybeans"]
+        valid_crops = ['corn', 'cotton', 'soybeans', 'wheat']
         if crop not in valid_crops:
             raise argparse.ArgumentTypeError(
-                f"Crop `{crop}` is not one of: ['corn', 'cotton', 'soybeans']."
+                f"Crop `{crop}` is not one of: ['corn', 'cotton', 'soybeans', 'wheat']."
             )
 
         return crop
@@ -499,8 +512,8 @@ def scrape_wasde_data():
         "--crops",
         type=lambda x: valid_crop(x),
         nargs="+",
-        choices=["corn", "cotton", "soybeans"],
-        default=["corn", "cotton", "soybeans"],
+        choices=['corn', 'cotton', 'soybeans', 'wheat'],
+        default=['corn', 'cotton', 'soybeans', 'wheat'],
         help="Crop name(s).",
     )
 
@@ -584,13 +597,6 @@ def scrape_wasde_data():
             # note, this is for all crops
             no_data_list = ["10-2013", "01-2019", "10-2025"]
 
-            # same here: the text files do not exist for any crop, so look for XLS files instead
-            # no_text_list = (
-            #     pd.date_range(start="2010-10-01", end="2016-09-01", freq="MS")
-            #     .strftime("%m-%Y")
-            #     .tolist()
-            # )
-
             if f"{month:02d}-{year}" in no_data_list:
                 # for the month, we can add a 0 to the int version to make the years the same
                 tqdm.write(f"   ⚠️  Ignoring data for {month:02d}-{year} because it does not exist.")
@@ -599,7 +605,7 @@ def scrape_wasde_data():
 
             query_url = build_query_url(BASE_URL, year, month)
             if SHOW_OUTPUT:
-                tqdm.write(f"   🔎 {year:04d}-{month:02d} → {query_url}")
+                tqdm.write(f"   🔎 {year:04d}-{month:02d} --> {query_url}")
 
             # retrieve the HTML page for the month
             try:
@@ -640,11 +646,11 @@ def scrape_wasde_data():
                 out_path.write_text(crop_block, encoding="utf-8")
 
                 if SHOW_OUTPUT:
-                    tqdm.write(f"   ✅ Saved → {out_path}")
+                    tqdm.write(f"   ✅ Saved --> {out_path}")
                     tqdm.write("")
                 continue  # we’re done for this month – go to next iteration
 
-            # no suitable TXT → try XLS fallback
+            # no suitable TXT --> try XLS fallback
             xls_href = find_wasde_xls_link(soup, month, year)
 
             if not xls_href or not filename_matches_query(xls_href, crop, year, month):
@@ -675,7 +681,7 @@ def scrape_wasde_data():
                 tqdm.write("")
                 continue
 
-            # search each sheet for the soy- or corn‑supply regex and keep only those that contain at least one match
+            # search each sheet for the soy- or corn-supply regex and keep only those that contain at least one match
             matching_sheets = {}
 
             for sheet_name, df in sheets_dict.items():
@@ -695,7 +701,7 @@ def scrape_wasde_data():
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
 
             if SHOW_OUTPUT:
-                tqdm.write(f"   ✅ Saved matching sheet(s) → {out_path}")
+                tqdm.write(f"   ✅ Saved matching sheet(s) --> {out_path}")
                 tqdm.write("")
 
         print()

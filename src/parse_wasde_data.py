@@ -145,7 +145,7 @@ def add_manual_data(crop: str) -> pd.DataFrame:
             [606, 708, np.nan, 665],
         ]
 
-    else:  # crop == 'soybeans':
+    elif crop == 'soybeans':
         dates = [
             pd.to_datetime(date)
             for date in ['1991-05-01', '1992-05-01', '1993-05-01', '1994-05-01']
@@ -170,6 +170,33 @@ def add_manual_data(crop: str) -> pd.DataFrame:
             [34.0, 34.3, np.nan, np.nan],
             [34.2, 37.6, np.nan, 35.1],
             [37.6, 32.0, np.nan, 35.0],
+        ]
+
+    else:  # crop == 'wheat'
+        dates = [
+            pd.to_datetime(date)
+            for date in ['1991-05-01', '1992-05-01', '1993-05-01', '1994-05-01']
+        ]
+
+        pa_lines = [
+            [76.6, 77.3, np.nan, np.nan],
+            [77.2, 69.9, np.nan, np.nan],
+            [69.9, 72.3, np.nan, 72.3],
+            [72.3, 72.2, np.nan, 71.5],
+        ]
+
+        ha_lines = [
+            [62.2, 69.4, np.nan, np.nan],
+            [69.3, 57.7, np.nan, np.nan],
+            [57.7, 62.4, np.nan, 64.5],
+            [62.4, 62.6, np.nan, 61.9],
+        ]
+
+        y_lines = [
+            [32.7, 39.5, np.nan, np.nan],
+            [39.5, 34.3, np.nan, np.nan],
+            [34.3, 39.4, np.nan, 38.9],
+            [39.4, 38.3, np.nan, 38.1],
         ]
 
     df = create_wasde_df(dates, pa_lines, ha_lines, y_lines)
@@ -250,7 +277,7 @@ def parse_txt_files(filenames: list, crop: str) -> pd.DataFrame:
                 y_line = convert_and_pad_list(y_line)
                 y_lines.append(y_line)
 
-            else:  # crop == 'soybeans'
+            elif crop == 'soybeans':
                 matching_lines = [line for line in lines if 'planted' in line]
                 pa_line = matching_lines[0].replace('area', '').replace('planted', '').split()
                 pa_line = convert_and_pad_list(pa_line)
@@ -281,6 +308,28 @@ def parse_txt_files(filenames: list, crop: str) -> pd.DataFrame:
                 y_line = convert_and_pad_list(y_line)
                 y_lines.append(y_line)
 
+            else:  # crop == 'wheat'
+                matching_lines = [line for line in lines if 'planted' in line]
+                pa_line = matching_lines[0].replace('area', '').replace('planted', '').split()
+                pa_line = convert_and_pad_list(pa_line)
+                pa_lines.append(pa_line)
+
+                matching_lines = [line for line in lines if 'harvested' in line]
+                ha_line = matching_lines[0].replace('area', '').replace('harvested', '').split()
+                ha_line = convert_and_pad_list(ha_line)
+                ha_lines.append(ha_line)
+
+                if int(year) < 2016:  # label format changes after this date
+                    pattern = re.compile(r'^.*\bacre\b.*$', re.MULTILINE | re.IGNORECASE)
+                    matching_lines = [line for line in lines if pattern.search(line)]
+                    y_line = matching_lines[0].replace('acre', '').split()
+                else:
+                    matching_lines = [line for line in lines if 'yield per harvested acre' in line]
+                    y_line = matching_lines[0].replace('yield per harvested acre', '').split()
+
+                y_line = convert_and_pad_list(y_line)
+                y_lines.append(y_line)
+
     df = create_wasde_df(dates, pa_lines, ha_lines, y_lines)
 
     return df
@@ -294,8 +343,10 @@ def parse_xls_files(filenames: list, crop: str) -> pd.DataFrame:
         XLS_SEARCH_TERM = 'Feed Grain and Corn Supply and Use'
     elif crop == 'cotton':
         XLS_SEARCH_TERM = 'Cotton Supply and Use'
-    else:  # crop == 'soybeans'
+    elif crop == 'soybeans':
         XLS_SEARCH_TERM = 'Soybeans and Products Supply and Use'
+    else:  # crop == 'wheat'
+        XLS_SEARCH_TERM = 'Wheat Supply and Use'
 
     dates = []
     pa_lines = []
@@ -309,8 +360,26 @@ def parse_xls_files(filenames: list, crop: str) -> pd.DataFrame:
 
         # test case files: cotton_2016_08 has a different format than cotton_2010_10
         df = pd.read_excel(filename)
+
+        # the wheat data is formatted slightly different than the other crops,
+        # which makes dropping empty columns difficult. so we need to do that first
+        if crop == 'wheat':
+            start_pattern = XLS_SEARCH_TERM
+            mask = df.astype(str).apply(lambda row: row.str.contains(start_pattern).any(), axis=1)
+            start_idx = mask.idxmax() if mask.any() else None
+
+            end_pattern = 'U.S. Wheat by Class: Supply and Use'
+            mask = df.astype(str).apply(lambda row: row.str.contains(end_pattern).any(), axis=1)
+            end_idx = mask.idxmax() if mask.any() else None
+
+            df = df.iloc[start_idx + 2 : end_idx]
+
         # drop filler columns and rows
-        df = df[~df.apply(lambda row: row.astype(str).str.contains(XLS_SEARCH_TERM).any(), axis=1)]
+        else:
+            df = df[
+                ~df.apply(lambda row: row.astype(str).str.contains(XLS_SEARCH_TERM).any(), axis=1)
+            ]
+
         df = df[~df.apply(lambda row: row.astype(str).str.contains('WASDE').any(), axis=1)]
         df = df.dropna(how='all', axis=1).dropna(how='all', axis=0)
 
@@ -372,7 +441,7 @@ def parse_xls_files(filenames: list, crop: str) -> pd.DataFrame:
             ha_lines.append(ha_line)
             y_lines.append(y_line)
 
-        else:  # crop == 'soybeans'
+        elif crop == 'soybeans':
             if pd.to_datetime(date) < pd.to_datetime('2015-07-01'):
                 df.columns = [
                     'label',
@@ -422,6 +491,33 @@ def parse_xls_files(filenames: list, crop: str) -> pd.DataFrame:
             ha_lines.append(ha_line)
             y_lines.append(y_line)
 
+        else:  # crop == 'wheat'
+            df = df.reset_index(drop=True)
+
+            df.columns = ['label', 'year_minus_2', 'year_minus_1', 'last_month', 'current_month']
+            df['label'] = df.label.str.lower().str.strip()
+            df = df.query(
+                " label == 'area planted' or label == 'area harvested' or label == 'yield per harvested acre' "
+            )
+
+            # remove all asterisks
+            for column in df.columns:
+                df[column] = df[column].astype(str).str.replace('*', '')
+
+            pa_line = df.query(" label == 'area planted' ").iloc[:, 1:].values[0].tolist()
+            ha_line = df.query(" label == 'area harvested' ").iloc[:, 1:].values[0].tolist()
+            y_line = (
+                df.query(" label == 'yield per harvested acre' ").iloc[:, 1:].values[0].tolist()
+            )
+
+            pa_line = convert_and_pad_list(pa_line)
+            ha_line = convert_and_pad_list(ha_line)
+            y_line = convert_and_pad_list(y_line)
+
+            pa_lines.append(pa_line)
+            ha_lines.append(ha_line)
+            y_lines.append(y_line)
+
     df = create_wasde_df(dates, pa_lines, ha_lines, y_lines)
 
     return df
@@ -445,10 +541,10 @@ def parse_wasde_data():
         except ValueError:
             raise argparse.ArgumentTypeError('Crop values must be of type `str`.')
 
-        valid_crops = ['corn', 'cotton', 'soybeans']
+        valid_crops = ['corn', 'cotton', 'soybeans', 'wheat']
         if crop not in valid_crops:
             raise argparse.ArgumentTypeError(
-                f"Crop `{crop}` is not one of: ['corn', 'cotton', 'soybeans']."
+                f"Crop `{crop}` is not one of: ['corn', 'cotton', 'soybeans', 'wheat]."
             )
 
         return crop
@@ -462,8 +558,8 @@ def parse_wasde_data():
         '--crops',
         type=lambda x: valid_crop(x),
         nargs='+',
-        choices=['corn', 'cotton', 'soybeans'],
-        default=['corn', 'cotton', 'soybeans'],
+        choices=['corn', 'cotton', 'soybeans', 'wheat'],
+        default=['corn', 'cotton', 'soybeans', 'wheat'],
         help='Crop name(s).',
     )
 
